@@ -1,5 +1,6 @@
 package Utils;
 import com.baidu.aip.ocr.AipOcr;
+
 import org.json.JSONArray;
 import org.json.JSONException;
 import org.json.JSONObject;
@@ -26,9 +27,12 @@ public class WordDiscernUtil {
 
 	private synchronized static void createAipOcr() {
 		// 设置APPID/AK/SK 需自行去百度申请哦
-		String APP_ID = "11698324";
-		String API_KEY = "YdwAeKtqayHo9Q58fHiuzU2M";
-		String SECRET_KEY = "RQbi6aTv7oMrcoiU4ETomjIoSNSanad0";
+		String APP_ID = ReceourceManage.getInstance().getProperty(
+				"wordDiscern.APP_ID");;
+		String API_KEY = ReceourceManage.getInstance().getProperty(
+				"wordDiscern.API_KEY");
+		String SECRET_KEY = ReceourceManage.getInstance().getProperty(
+				"wordDiscern.SECRET_KEY");
 		// 初始化一个AipOcr
 		client = new AipOcr(APP_ID, API_KEY, SECRET_KEY);
 		// 可选：设置网络连接参数
@@ -48,11 +52,11 @@ public class WordDiscernUtil {
 		return resultList;
 	}
 
-	// 返回一个包含全部文字的List高精度方法
-	public JSONArray basicAccurateGeneral(byte[] image) throws JSONException {
+	// 返回一个包含全部文字的List通用方法
+	public JSONArray general(byte[] image) throws JSONException {
 		HashMap<String, String> options = new HashMap<String, String>();
 		options.put("vertexes_location", "true");
-		JSONObject jsonObject = client.basicAccurateGeneral(image, options);
+		JSONObject jsonObject = client.general(image, options);
 		JSONArray resultList = jsonObject.getJSONArray("words_result");
 		return resultList;
 	}

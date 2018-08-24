@@ -1,4 +1,4 @@
-package Utils;
+package auto.view;
 
 import static com.sun.jna.platform.win32.WinUser.GW_HWNDFIRST;
 import static com.sun.jna.platform.win32.WinUser.GW_HWNDNEXT;
@@ -6,6 +6,7 @@ import static com.sun.jna.platform.win32.WinUser.WS_DISABLED;
 import static com.sun.jna.platform.win32.WinUser.WS_MINIMIZE;
 import static com.sun.jna.platform.win32.WinUser.WS_VISIBLE;
 
+import java.awt.AWTEvent;
 import java.awt.AWTException;
 import java.awt.AlphaComposite;
 import java.awt.BasicStroke;
@@ -13,6 +14,7 @@ import java.awt.Color;
 import java.awt.Composite;
 import java.awt.Cursor;
 import java.awt.Dimension;
+import java.awt.FlowLayout;
 import java.awt.Graphics;
 import java.awt.Graphics2D;
 import java.awt.MouseInfo;
@@ -21,18 +23,25 @@ import java.awt.Rectangle;
 import java.awt.Robot;
 import java.awt.Stroke;
 import java.awt.Toolkit;
+import java.awt.event.AWTEventListener;
+import java.awt.event.KeyEvent;
 import java.awt.event.MouseAdapter;
 import java.awt.event.MouseEvent;
 import java.awt.image.BufferedImage;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.util.HashMap;
+import java.util.Timer;
+import java.util.TimerTask;
 
 import javax.imageio.ImageIO;
 import javax.swing.ImageIcon;
 import javax.swing.JButton;
 import javax.swing.JFrame;
 import javax.swing.JPanel;
+
+import auto.controller.AutoTaskManger;
+import auto.controller.task.AutoTranslateTask;
 
 import com.sun.jna.platform.win32.User32;
 import com.sun.jna.platform.win32.WinDef;
@@ -47,8 +56,8 @@ import com.sun.jna.platform.win32.WinUser.WINDOWINFO;
  * @author Administrator
  *
  */
-public class ScreenRectCatch {
-	private static ScreenRectCatch instance = null;
+public class ScreenRectCatchFrame {
+	private static ScreenRectCatchFrame instance = null;
 	private HashMap<Integer, Rectangle> winLayer = null;
 	private Dimension screenSize = null;
 	private Robot rb = null;
@@ -56,21 +65,23 @@ public class ScreenRectCatch {
 	private JFrame jf;
 	private Cursor myCursor;
 	private myContentPane jp;
-
+	private Rectangle targetRectangle = null;
 	private Point start = new Point(0, 0), end = new Point(0, 0);
 	private Point prePos, startCopy, endCopy;
-	private volatile boolean shotBusy = false;// 防止重复截图。
+	private ByteArrayOutputStream out = new ByteArrayOutputStream();
 	private volatile boolean isProcess = false;// 第一次拖拽完成后，需要进行处理，这时候需要重新利用click,drag和release函数。
-	private Rectangle targetRectangle=null;
-	public static ScreenRectCatch getInstance() {
+	private AutoTaskManger taskManger;
+	private AutoMenuFrame parent;
+	public static ScreenRectCatchFrame getInstance() {
 		if (null == instance) {
-			instance = new ScreenRectCatch();
+			instance = new ScreenRectCatchFrame();
 		}
 		return instance;
 	}
 
-	private ScreenRectCatch() {
+	private ScreenRectCatchFrame() {
 		screenSize = Toolkit.getDefaultToolkit().getScreenSize();
+		taskManger=AutoTaskManger.getInstance();
 		try {
 			rb = new Robot();
 		} catch (AWTException e) {
@@ -150,32 +161,19 @@ public class ScreenRectCatch {
 		jf.setCursor(myCursor);// 给系统设置彩色光标。
 	}
 
-	/**
-	 * 外部调用接口，获取指定区域的图片
-	 * 
-	 * @return
-	 */
 
-	public BufferedImage getTargetImage() {
-		if (null == targetRectangle) {
-		    saveLayer();//保存窗口层次。
-			shotProcess();
-		}
-		return rb.createScreenCapture(targetRectangle);
-	}
 
-	public byte [] getTargetImageByte() {
-		ByteArrayOutputStream out = new ByteArrayOutputStream();
+	public byte[] getTargetImageByte() {
 		try {
-			ImageIO.write(getTargetImage(), "png", out);
-			
+			ImageIO.write(rb.createScreenCapture(targetRectangle), "png", out);
 		} catch (IOException e) {
-			// TODO Auto-generated catch block
 			e.printStackTrace();
 		}
 		byte[] bt = out.toByteArray();
+		
 		return bt;
 	}
+
 	/**
 	 * 将鼠标绘制成彩色
 	 * 
@@ -185,9 +183,10 @@ public class ScreenRectCatch {
 		return Toolkit
 				.getDefaultToolkit()
 				.createCustomCursor(
-						new ImageIcon(
-								ScreenRectCatch.class.getResource("cursor.png"))
-								.getImage(), new Point(0, 0), "myCursor");
+						new ImageIcon(ScreenRectCatchFrame.class
+								.getResource("../../resource/cursor.png"))
+								.getImage(),
+						new Point(0, 0), "myCursor");
 	}
 
 	/** 图像添加鼠标:http://blog.csdn.net/eguid_1/article/details/52973508 **/
@@ -195,7 +194,8 @@ public class ScreenRectCatch {
 		Graphics2D g2d = (Graphics2D) bi.getGraphics();
 		g2d.drawImage(bi, 0, 0, bi.getWidth(), bi.getHeight(), null);
 		ImageIcon img = new ImageIcon(
-				ScreenRectCatch.class.getResource("resource/whiteCursor.png"));
+				ScreenRectCatchFrame.class
+						.getResource("../../resource/whiteCursor.png"));
 		Point mp = MouseInfo.getPointerInfo().getLocation();
 		g2d.drawImage(img.getImage(), mp.x, mp.y, img.getIconWidth(),
 				img.getIconHeight(), null);
@@ -204,14 +204,34 @@ public class ScreenRectCatch {
 
 	private void clean() {
 		jf.dispose();
-		shotBusy = false;
 		isProcess = false;
 		start = new Point(0, 0);
 		end = new Point(0, 0);
 	}
+	
+	AWTEventListener al;
 
+	private void registerESC() {
+		al = event -> {
+			KeyEvent ke = (KeyEvent) event;
+			if (ke.getID() == KeyEvent.KEY_PRESSED) {
+				if (ke.getKeyCode() == KeyEvent.VK_ESCAPE) {
+					clean();
+					unregisterESC();
+					jp.setDrag(false);
+				}
+			}
+		};
+		Toolkit.getDefaultToolkit().addAWTEventListener(al,
+				AWTEvent.KEY_EVENT_MASK);
+	}
+
+	private void unregisterESC() {
+		Toolkit.getDefaultToolkit().removeAWTEventListener(al);
+	}
 	private class myContentPane extends JPanel {
 
+		private static final long serialVersionUID = 1L;
 		Point myStart = new Point(0, 0);
 		public volatile boolean dragFlag = false;
 		public volatile boolean moveFlag = false;
@@ -302,8 +322,8 @@ public class ScreenRectCatch {
 
 	private class mouseEvent extends MouseAdapter {
 		/** 拖拽参数 **/
-		private static final int BREADTH = 7;// 边界拉伸范围
-		private static final int BREADTH2 = 14;// 边界拉伸范围
+		private static final int BREADTH = 1;// 边界拉伸范围
+		private static final int BREADTH2 = 1;// 边界拉伸范围
 		private int dragType;
 		private static final int DRAG_NONE = 0;
 		private static final int DRAG_MOVE = 1;
@@ -400,7 +420,7 @@ public class ScreenRectCatch {
 			} else {
 				refP = new Point(end.x, end.y);
 			}
-			selPanel.setBounds(refP.x - 150, refP.y + 10, 150, 20);
+			selPanel.setBounds(refP.x - 250, refP.y + 10, 250, 40);
 			selPanel.updateUI();
 		}
 
@@ -413,27 +433,30 @@ public class ScreenRectCatch {
 			} else {
 				refP = new Point(end.x, end.y);
 			}
-			selPanel = new JPanel(null);
-			selPanel.setBounds(refP.x - 150, refP.y + 10, 150, 20);
+			selPanel = new JPanel();
+			selPanel.setOpaque(false);
+			selPanel.setLayout(new FlowLayout(FlowLayout.RIGHT));
+			selPanel.setBounds(refP.x - 250, refP.y + 10, 250, 40);
 			ok = new JButton("确定");
-			ok.setBounds(100, 0, 50, 20);
 			ok.addActionListener(e -> {
-				// TODO 开始初始化目标框体的起点终点 长宽高
-			
+				targetRectangle=new Rectangle(start.x,start.y,end.x-start.x,end.y-start.y);
+				taskManger.setTargetRectangle(targetRectangle);
 				jp.setDrag(false);
+				if(parent.needTranslate()){
+					new AutoTranslateTask();
+				}
+				doTaskExecute();
+				clean();
 			});
 			cancel = new JButton("重新截图");
-			cancel.setBounds(50, 0, 50, 20);
 			cancel.addActionListener(e -> {
-				// TODO
-				clean();
+				shotProcess();
 				jp.setDrag(false);
 			});
 			save = new JButton("退出");
 			save.addActionListener(e -> {
-				// TODO
+				System.exit(0);
 			});
-			save.setBounds(0, 0, 50, 20);
 			selPanel.add(ok);
 			selPanel.add(cancel);
 			selPanel.add(save);
@@ -447,7 +470,9 @@ public class ScreenRectCatch {
 		}
 
 		JPanel selPanel;
-		JButton ok = null, cancel = null, save = null;
+		JButton ok = null;
+		JButton cancel = null;
+		JButton save = null;
 		public volatile boolean isDrag = false;
 
 		public void mouseDragged(MouseEvent e) {
@@ -614,5 +639,22 @@ public class ScreenRectCatch {
 			}
 		}
 	}
+
+	public void positioning(AutoMenuFrame parent) {
+		this.parent=parent;
+		saveLayer();
+		   registerESC();//注册窗体全局热键
+		shotProcess();
+	}
+
+	public void doTaskExecute() {
+		Timer timer = new Timer();
+		timer.schedule(new TimerTask() {
+			public void run() {
+				taskManger.autoTaskExecut(getTargetImageByte());
+			}
+		}, 1000, 2000);
+	}
+		
 
 }
